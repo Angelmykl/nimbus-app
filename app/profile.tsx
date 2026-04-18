@@ -16,34 +16,39 @@ export default function Profile() {
     if (address) { await Clipboard.setStringAsync(address); Alert.alert('✅ Copied!', 'Address copied'); }
   };
 
-  const viewOnExplorer = () => {
-    Alert.alert('Arc Explorer', `${ARC_TESTNET.explorerUrl}/address/${address}`);
-  };
-
   const handleDisconnect = () => {
+    const isExternal = walletType === 'external';
     Alert.alert(
-      'Disconnect Wallet',
-      walletType === 'external'
+      isExternal ? '🔌 Disconnect MetaMask' : '⚠️ Remove Wallet',
+      isExternal
         ? 'Disconnect your MetaMask wallet from Nimbus?'
-        : 'Remove this wallet from the device? Save your private key first!',
+        : 'This removes the wallet from this device. Make sure you have your private key saved!',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Disconnect',
+          text: isExternal ? 'Disconnect' : 'Remove Wallet',
           style: 'destructive',
           onPress: async () => {
-            if (walletType === 'internal') {
-              await AsyncStorage.removeItem('nimbus_wallet_pk');
+            try {
+              await AsyncStorage.multiRemove([
+                'nimbus_wallet_pk',
+                'nimbus_connected_address',
+                'nimbus_wallet_type',
+              ]);
+              await disconnectWallet();
+              router.replace('/welcome');
+            } catch (e) {
+              Alert.alert('Error', 'Failed to disconnect. Try again.');
             }
-            await disconnectWallet();
-            router.replace('/welcome');
           }
         }
       ]
     );
   };
 
-  const totalSent = transactions.filter(t => t.type === 'sent').reduce((sum, t) => sum + parseFloat(t.amount || '0'), 0);
+  const totalSent = transactions
+    .filter(t => t.type === 'sent')
+    .reduce((sum, t) => sum + parseFloat(t.amount || '0'), 0);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -55,32 +60,25 @@ export default function Profile() {
         <View style={{ width: 40 }} />
       </View>
 
-      {/* Avatar & connection status */}
       <View style={styles.avatarSection}>
         <View style={styles.avatar}><Text style={styles.avatarEmoji}>☁️</Text></View>
         <Text style={styles.walletLabel}>Nimbus Wallet</Text>
         <TouchableOpacity onPress={copyAddress}>
           <Text style={styles.walletAddress}>{address ? shortAddress(address) : '...'} ⎘</Text>
         </TouchableOpacity>
-
-        {/* Connection type badge */}
-        <View style={[styles.connBadge, walletType === 'external' ? styles.connBadgeExternal : styles.connBadgeInternal]}>
+        <View style={[styles.connBadge, walletType === 'external' ? styles.connExternal : styles.connInternal]}>
           <Text style={styles.connBadgeText}>
             {walletType === 'external' ? '🦊 MetaMask Connected' : '🔑 Private Key Wallet'}
           </Text>
         </View>
       </View>
 
-      {/* Connect different wallet button */}
       <TouchableOpacity style={styles.connectBtn} onPress={() => setShowConnect(true)}>
         <Text style={styles.connectBtnEmoji}>🔗</Text>
-        <Text style={styles.connectBtnText}>
-          {walletType === 'external' ? 'Switch Wallet' : 'Connect MetaMask Instead'}
-        </Text>
+        <Text style={styles.connectBtnText}>{walletType === 'external' ? 'Switch Wallet' : 'Connect MetaMask Instead'}</Text>
         <Text style={styles.connectBtnArrow}>›</Text>
       </TouchableOpacity>
 
-      {/* Stats */}
       <View style={styles.statsRow}>
         {[
           { label: 'Balance', value: `$${formatUSDC(balance)}` },
@@ -94,17 +92,15 @@ export default function Profile() {
         ))}
       </View>
 
-      {/* Card status */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Nimbus Card</Text>
-        <TouchableOpacity style={styles.cardStatusRow} onPress={() => router.push('/card')}>
+        <TouchableOpacity style={styles.cardRow} onPress={() => router.push('/card')}>
           <View style={[styles.cardDot, { backgroundColor: hasCard ? COLORS.success : COLORS.textMuted }]} />
-          <Text style={styles.cardStatusText}>{hasCard ? '✓ Active NFT Card' : 'No card — Tap to get one'}</Text>
-          <Text style={styles.cardStatusArrow}>›</Text>
+          <Text style={styles.cardRowText}>{hasCard ? '✓ Active NFT Card' : 'No card — Tap to mint'}</Text>
+          <Text style={styles.cardRowArrow}>›</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Wallet info */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Wallet Info</Text>
         <View style={styles.infoCard}>
@@ -122,7 +118,6 @@ export default function Profile() {
         </View>
       </View>
 
-      {/* Full address */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Wallet Address</Text>
         <TouchableOpacity style={styles.addressCard} onPress={copyAddress}>
@@ -131,11 +126,10 @@ export default function Profile() {
         </TouchableOpacity>
       </View>
 
-      {/* Actions */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Actions</Text>
         <View style={styles.actionsCard}>
-          <TouchableOpacity style={styles.actionRow} onPress={viewOnExplorer}>
+          <TouchableOpacity style={styles.actionRow} onPress={() => Alert.alert('Arc Explorer', `${ARC_TESTNET.explorerUrl}/address/${address}`)}>
             <Text style={styles.actionIcon}>🔍</Text>
             <Text style={styles.actionText}>View on Arc Explorer</Text>
             <Text style={styles.actionArrow}>›</Text>
@@ -157,17 +151,12 @@ export default function Profile() {
         </View>
       </View>
 
-      <View style={styles.versionBadge}>
-        <Text style={styles.versionText}>Nimbus v1.0 • Arc Testnet • Built by Angelmykl</Text>
-      </View>
+      <Text style={styles.version}>Nimbus v1.0 • Arc Testnet • Built by Angelmykl</Text>
 
       <ConnectWalletModal
         visible={showConnect}
         onClose={() => setShowConnect(false)}
-        onConnected={(addr) => {
-          setExternalWallet(addr);
-          setShowConnect(false);
-        }}
+        onConnected={(addr) => { setExternalWallet(addr); setShowConnect(false); }}
       />
     </ScrollView>
   );
@@ -186,8 +175,8 @@ const styles = StyleSheet.create({
   walletLabel: { fontSize: 18, fontWeight: '700', color: COLORS.text },
   walletAddress: { fontSize: 13, color: COLORS.accent, fontWeight: '500' },
   connBadge: { borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, marginTop: 4 },
-  connBadgeExternal: { backgroundColor: 'rgba(255,179,71,0.1)', borderColor: COLORS.warning },
-  connBadgeInternal: { backgroundColor: COLORS.accentGlow, borderColor: COLORS.accent },
+  connExternal: { backgroundColor: 'rgba(255,179,71,0.1)', borderColor: COLORS.warning },
+  connInternal: { backgroundColor: COLORS.accentGlow, borderColor: COLORS.accent },
   connBadgeText: { fontSize: 12, fontWeight: '600', color: COLORS.text },
   connectBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: 16, borderWidth: 1, borderColor: COLORS.accent, padding: 16, gap: 12 },
   connectBtnEmoji: { fontSize: 20 },
@@ -199,10 +188,10 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 11, color: COLORS.textSecondary },
   section: { gap: 10 },
   sectionTitle: { fontSize: 16, fontWeight: '600', color: COLORS.text },
-  cardStatusRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: 14, borderWidth: 1, borderColor: COLORS.cardBorder, padding: 16, gap: 12 },
+  cardRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: 14, borderWidth: 1, borderColor: COLORS.cardBorder, padding: 16, gap: 12 },
   cardDot: { width: 10, height: 10, borderRadius: 5 },
-  cardStatusText: { flex: 1, color: COLORS.text, fontSize: 14, fontWeight: '500' },
-  cardStatusArrow: { color: COLORS.textMuted, fontSize: 20 },
+  cardRowText: { flex: 1, color: COLORS.text, fontSize: 14, fontWeight: '500' },
+  cardRowArrow: { color: COLORS.textMuted, fontSize: 20 },
   infoCard: { backgroundColor: COLORS.card, borderRadius: 16, borderWidth: 1, borderColor: COLORS.cardBorder, overflow: 'hidden' },
   infoRow: { flexDirection: 'row', justifyContent: 'space-between', padding: 14 },
   infoBorder: { borderBottomWidth: 1, borderBottomColor: COLORS.cardBorder },
@@ -217,6 +206,5 @@ const styles = StyleSheet.create({
   actionIcon: { fontSize: 18 },
   actionText: { flex: 1, color: COLORS.text, fontSize: 14, fontWeight: '500' },
   actionArrow: { color: COLORS.textMuted, fontSize: 20 },
-  versionBadge: { alignItems: 'center' },
-  versionText: { color: COLORS.textMuted, fontSize: 11 },
+  version: { color: COLORS.textMuted, fontSize: 11, textAlign: 'center' },
 });

@@ -3,11 +3,11 @@ import { router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { useState } from 'react';
 import { useWallet } from '../src/hooks/useWallet';
-import { shortAddress, mintNimbusCard } from '../src/utils/wallet';
+import { shortAddress, mintNimbusCard, mintNimbusCardMetaMask } from '../src/utils/wallet';
 import { COLORS, CONTRACTS } from '../src/constants';
 
 export default function Card() {
-  const { address, hasCard, balance, refresh } = useWallet();
+  const { address, hasCard, balance, refresh, walletType } = useWallet();
   const [minting, setMinting] = useState(false);
 
   const copyAddress = async () => {
@@ -16,26 +16,39 @@ export default function Card() {
 
   const handleMint = async () => {
     if (!address) return;
-    Alert.alert('💳 Mint Nimbus Card', 'This sends a real transaction on Arc Testnet. Your card will be an ERC-721 NFT.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Mint Card',
-        onPress: async () => {
-          setMinting(true);
-          try {
-            const { hash } = await mintNimbusCard(address);
-            await refresh();
-            Alert.alert('🎉 Card Minted!', `NFT issued to your wallet!\n\nTx: ${hash.slice(0, 20)}...`);
-          } catch (e: any) {
-            if (e.message === 'OWNER_ONLY') {
-              Alert.alert('Owner Required', 'To mint a card:\n\n1. Import the deployer wallet (from nimbus-contracts)\n2. Come back here and tap Mint\n\nThe deployer address is:\n0xC802Aca1766Aa343b54D5Bde70D4E90655468AD0');
-            } else {
-              Alert.alert('Error', e.message || 'Minting failed');
-            }
-          } finally { setMinting(false); }
+    Alert.alert(
+      '💳 Mint Nimbus Card',
+      'Mint your Nimbus Card NFT on Arc Testnet. Anyone can mint their own card now!',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Mint My Card',
+          onPress: async () => {
+            setMinting(true);
+            try {
+              let hash: string;
+              if (walletType === 'external') {
+                // MetaMask connected - use MetaMask to sign
+                const result = await mintNimbusCardMetaMask(address);
+                hash = result.hash;
+              } else {
+                // Internal wallet
+                const result = await mintNimbusCard(address);
+                hash = result.hash;
+              }
+              await refresh();
+              Alert.alert('🎉 Card Minted!', `Your Nimbus Card NFT is live!\n\nTx: ${hash.slice(0, 20)}...`);
+            } catch (e: any) {
+              if (e.message === 'NO_INTERNAL_WALLET') {
+                Alert.alert('No Internal Wallet', 'You are connected via MetaMask. The mint will use MetaMask to sign.');
+              } else {
+                Alert.alert('Error', e.message || 'Minting failed. Make sure Arc Testnet is selected in MetaMask.');
+              }
+            } finally { setMinting(false); }
+          }
         }
-      }
-    ]);
+      ]
+    );
   };
 
   return (
@@ -64,11 +77,19 @@ export default function Card() {
         <View style={styles.cardEmpty}>
           <Text style={styles.cardEmptyIcon}>💳</Text>
           <Text style={styles.cardEmptyTitle}>No Card Yet</Text>
-          <Text style={styles.cardEmptyText}>Your Nimbus Card is an ERC-721 NFT on Arc that authorizes payments on Bazarc</Text>
-          <TouchableOpacity style={[styles.mintBtn, minting && { opacity: 0.6 }]} onPress={handleMint} disabled={minting}>
+          <Text style={styles.cardEmptyText}>
+            Your Nimbus Card is an ERC-721 NFT on Arc.{'\n'}Anyone can mint their own — no restrictions!
+          </Text>
+          <TouchableOpacity
+            style={[styles.mintBtn, minting && { opacity: 0.6 }]}
+            onPress={handleMint}
+            disabled={minting}
+          >
             {minting ? <ActivityIndicator color="#fff" /> : <Text style={styles.mintBtnText}>🪄 Mint My Nimbus Card</Text>}
           </TouchableOpacity>
-          <Text style={styles.mintNote}>Requires deployer wallet • ~$0.01 USDC gas</Text>
+          <Text style={styles.mintNote}>
+            {walletType === 'external' ? '🦊 Will use MetaMask to sign' : '🔑 Uses your internal wallet'} • ~$0.01 gas
+          </Text>
         </View>
       )}
 
@@ -101,9 +122,9 @@ export default function Card() {
         <Text style={styles.sectionTitle}>How It Works</Text>
         <View style={styles.howCard}>
           {[
-            { step: '1', text: 'Card is minted as an NFT to your wallet' },
-            { step: '2', text: 'Smart contract verifies you hold the NFT' },
-            { step: '3', text: 'Tap "Buy" on Bazarc to authorize payments' },
+            { step: '1', text: 'Tap mint — anyone can get their own card' },
+            { step: '2', text: 'NFT is minted to your wallet on Arc Testnet' },
+            { step: '3', text: 'Use your card to buy on Bazarc marketplace' },
           ].map((item) => (
             <View key={item.step} style={styles.howRow}>
               <View style={styles.stepBadge}><Text style={styles.stepNum}>{item.step}</Text></View>
@@ -136,13 +157,13 @@ const styles = StyleSheet.create({
   cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   cardBrand: { color: 'rgba(255,255,255,0.8)', fontSize: 16, fontWeight: '800', letterSpacing: 3 },
   cardStatus: { color: COLORS.success, fontSize: 11, fontWeight: '700' },
-  cardEmpty: { backgroundColor: COLORS.card, borderRadius: 24, borderWidth: 1, borderColor: COLORS.cardBorder, borderStyle: 'dashed', minHeight: 220, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24 },
+  cardEmpty: { backgroundColor: COLORS.card, borderRadius: 24, borderWidth: 1, borderColor: COLORS.cardBorder, borderStyle: 'dashed', minHeight: 240, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 24 },
   cardEmptyIcon: { fontSize: 44 },
   cardEmptyTitle: { color: COLORS.text, fontSize: 20, fontWeight: '700' },
-  cardEmptyText: { color: COLORS.textSecondary, fontSize: 13, textAlign: 'center', paddingHorizontal: 20 },
-  mintBtn: { marginTop: 8, backgroundColor: COLORS.accent, borderRadius: 14, paddingHorizontal: 32, paddingVertical: 14, minWidth: 160, alignItems: 'center' },
+  cardEmptyText: { color: COLORS.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 20 },
+  mintBtn: { marginTop: 8, backgroundColor: COLORS.accent, borderRadius: 14, paddingHorizontal: 32, paddingVertical: 14, minWidth: 200, alignItems: 'center' },
   mintBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  mintNote: { color: COLORS.textMuted, fontSize: 11 },
+  mintNote: { color: COLORS.textMuted, fontSize: 11, textAlign: 'center' },
   section: { gap: 12 },
   sectionTitle: { fontSize: 16, fontWeight: '600', color: COLORS.text },
   detailCard: { backgroundColor: COLORS.card, borderRadius: 16, borderWidth: 1, borderColor: COLORS.cardBorder, overflow: 'hidden' },
