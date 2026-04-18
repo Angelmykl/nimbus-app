@@ -121,11 +121,11 @@ export async function mintNimbusCard(userAddress: string): Promise<{ hash: strin
   if (!pk) throw new Error('No wallet found');
   const provider = new ethers.JsonRpcProvider(ARC_TESTNET.rpcUrl);
   const signer = new ethers.Wallet(pk, provider);
-  const contract = new ethers.Contract(CONTRACTS.NIMBUS_CARD, ['function issueCard(address to) external', 'function owner() view returns (address)'], signer);
+  const contract = new ethers.Contract(CONTRACTS.NIMBUS_CARD, ['function mintMyCard() external', 'function owner() view returns (address)'], signer);
   const owner = await contract.owner();
   const signerAddress = await signer.getAddress();
   if (owner.toLowerCase() !== signerAddress.toLowerCase()) throw new Error('OWNER_ONLY');
-  const tx = await contract.issueCard(userAddress);
+  const tx = await contract.mintMyCard();
   await tx.wait();
   await addTransaction({ id: tx.hash, type: 'card_minted', amount: '0', address: userAddress, hash: tx.hash, timestamp: Date.now(), status: 'success', label: 'Nimbus Card Minted' });
   return { hash: tx.hash };
