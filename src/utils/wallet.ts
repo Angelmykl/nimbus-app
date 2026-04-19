@@ -28,6 +28,12 @@ export const publicClient = createPublicClient({
   transport: http(ARC_TESTNET.rpcUrl),
 });
 
+// ethers v5 provider - created fresh each time, NOT stored globally
+function getProvider() {
+  return new ethers.providers.JsonRpcProvider(ARC_TESTNET.rpcUrl);
+}
+
+// --- Transaction History ---
 export async function getTransactions(): Promise<Transaction[]> {
   const raw = await storage.getItem(TX_HISTORY_KEY);
   if (!raw) return [];
@@ -40,6 +46,7 @@ export async function addTransaction(tx: Transaction): Promise<void> {
   await storage.setItem(TX_HISTORY_KEY, JSON.stringify(updated));
 }
 
+// --- Products ---
 export async function getProducts(): Promise<Product[]> {
   const raw = await storage.getItem(PRODUCTS_KEY);
   if (!raw) return [];
@@ -51,6 +58,7 @@ export async function addProduct(product: Product): Promise<void> {
   await storage.setItem(PRODUCTS_KEY, JSON.stringify([product, ...existing]));
 }
 
+// --- Wallet Management ---
 export async function createWallet(): Promise<{ address: string; privateKey: string }> {
   const wallet = ethers.Wallet.createRandom();
   await storage.setItem(WALLET_KEY, wallet.privateKey);
@@ -72,6 +80,7 @@ export async function loadWallet(): Promise<{ address: string; privateKey: strin
   } catch { return null; }
 }
 
+// --- Blockchain Reads (uses viem - no conflict) ---
 export async function getUSDCBalance(address: string): Promise<string> {
   try {
     const balance = await publicClient.readContract({
@@ -96,25 +105,32 @@ export async function hasNimbusCard(address: string): Promise<boolean> {
   } catch { return false; }
 }
 
+// --- Send USDC (internal wallet, ethers v5) ---
 export async function sendUSDC(toAddress: string, amount: string): Promise<{ hash: string }> {
   const pk = await storage.getItem(WALLET_KEY);
   if (!pk) throw new Error('No wallet found');
-  const provider = new ethers.JsonRpcProvider(ARC_TESTNET.rpcUrl);
-  const signer = new ethers.Wallet(pk, provider);
-  const usdc = new ethers.Contract(CONTRACTS.USDC, ['function transfer(address to, uint256 amount) returns (bool)'], signer);
-  const parsedAmount = ethers.parseUnits(amount, 6);
+  const signer = new ethers.Wallet(pk, getProvider());
+  const usdc = new ethers.Contract(
+    CONTRACTS.USDC,
+    ['function transfer(address to, uint256 amount) returns (bool)'],
+    signer
+  );
+  const parsedAmount = ethers.utils.parseUnits(amount, 6);
   const tx = await usdc.transfer(toAddress, parsedAmount);
   await tx.wait();
-  await addTransaction({ id: tx.hash, type: 'sent', amount, address: toAddress, hash: tx.hash, timestamp: Date.now(), status: 'success' });
+  await addTransaction({
+    id: tx.hash, type: 'sent', amount,
+    address: toAddress, hash: tx.hash,
+    timestamp: Date.now(), status: 'success',
+  });
   return { hash: tx.hash };
 }
 
-// NEW: Anyone can mint their own card - no owner required
+// --- Mint Card (internal wallet) ---
 export async function mintNimbusCard(userAddress: string): Promise<{ hash: string }> {
   const pk = await storage.getItem(WALLET_KEY);
   if (!pk) throw new Error('NO_INTERNAL_WALLET');
-  const provider = new ethers.JsonRpcProvider(ARC_TESTNET.rpcUrl);
-  const signer = new ethers.Wallet(pk, provider);
+  const signer = new ethers.Wallet(pk, getProvider());
   const contract = new ethers.Contract(
     CONTRACTS.NIMBUS_CARD,
     ['function mintMyCard() external'],
@@ -122,40 +138,61 @@ export async function mintNimbusCard(userAddress: string): Promise<{ hash: strin
   );
   const tx = await contract.mintMyCard();
   await tx.wait();
-  await addTransaction({ id: tx.hash, type: 'card_minted', amount: '0', address: userAddress, hash: tx.hash, timestamp: Date.now(), status: 'success', label: 'Nimbus Card Minted' });
+  await addTransaction({
+    id: tx.hash, type: 'card_minted', amount: '0',
+    address: userAddress, hash: tx.hash,
+    timestamp: Date.now(), status: 'success',
+    label: 'Nimbus Card Minted',
+  });
   return { hash: tx.hash };
 }
 
-// MetaMask mint - calls mintMyCard via MetaMask
+// --- Mint Card (MetaMask - no ethers used) ---
 export async function mintNimbusCardMetaMask(userAddress: string): Promise<{ hash: string }> {
-  const { ethereum } = window as any;
-  if (!ethereum) throw new Error('MetaMask not found');
-  const iface = new ethers.Interface(['function mintMyCard() external']);
-  const data = iface.encodeFunctionData('mintMyCard');
-  const txHash = await ethereum.request({
+  const eth = (window as any).ethereum;
+  if (!eth) throw new Error('MetaMask not found');
+  // mintMyCard() function selector - calculated offline, no ethers needed
+  const data = '0x0deb2618';
+  const txHash = await eth.request({
     method: 'eth_sendTransaction',
-    params: [{ from: userAddress, to: CONTRACTS.NIMBUS_CARD, data, gas: '0x30D40' }],
+    params: [{
+      from: userAddress,
+      to: CONTRACTS.NIMBUS_CARD,
+      data,
+      gas: '0x30D40',
+    }],
   });
-  await addTransaction({ id: txHash, type: 'card_minted', amount: '0', address: userAddress, hash: txHash, timestamp: Date.now(), status: 'success', label: 'Nimbus Card Minted' });
+  await addTransaction({
+    id: txHash, type: 'card_minted', amount: '0',
+    address: userAddress, hash: txHash,
+    timestamp: Date.now(), status: 'success',
+    label: 'Nimbus Card Minted',
+  });
   return { hash: txHash };
 }
 
+// --- Escrow ---
 export async function createEscrowOrder(sellerAddress: string, amount: string): Promise<{ hash: string; orderId: string }> {
   const pk = await storage.getItem(WALLET_KEY);
   if (!pk) throw new Error('No wallet found');
-  const provider = new ethers.JsonRpcProvider(ARC_TESTNET.rpcUrl);
-  const signer = new ethers.Wallet(pk, provider);
+  const signer = new ethers.Wallet(pk, getProvider());
   const usdc = new ethers.Contract(CONTRACTS.USDC, ['function approve(address spender, uint256 amount) returns (bool)'], signer);
-  const parsedAmount = ethers.parseUnits(amount, 6);
+  const parsedAmount = ethers.utils.parseUnits(amount, 6);
   const approveTx = await usdc.approve(CONTRACTS.BAZARC_ESCROW, parsedAmount);
   await approveTx.wait();
   const escrow = new ethers.Contract(CONTRACTS.BAZARC_ESCROW, ['function createOrder(address seller, uint256 amount) returns (uint256)'], signer);
   const tx = await escrow.createOrder(sellerAddress, parsedAmount);
-  const receipt = await tx.wait();
-  await addTransaction({ id: tx.hash, type: 'purchase', amount, address: sellerAddress, hash: tx.hash, timestamp: Date.now(), status: 'success', label: 'Bazarc Purchase' });
+  await tx.wait();
+  await addTransaction({
+    id: tx.hash, type: 'purchase', amount,
+    address: sellerAddress, hash: tx.hash,
+    timestamp: Date.now(), status: 'success',
+    label: 'Bazarc Purchase',
+  });
   return { hash: tx.hash, orderId: '0' };
 }
 
+// --- Helpers ---
 export function shortAddress(address: string): string {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
