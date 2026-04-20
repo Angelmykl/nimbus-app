@@ -17,34 +17,30 @@ export default function Profile() {
   };
 
   const handleDisconnect = () => {
-    const isExternal = walletType === 'external';
-    Alert.alert(
-      isExternal ? '🔌 Disconnect MetaMask' : '⚠️ Remove Wallet',
-      isExternal
-        ? 'Disconnect your MetaMask wallet from Nimbus?'
-        : 'This removes the wallet from this device. Make sure you have your private key saved!',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: isExternal ? 'Disconnect' : 'Remove Wallet',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await AsyncStorage.multiRemove([
-                'nimbus_wallet_pk',
-                'nimbus_connected_address',
-                'nimbus_wallet_type',
-              ]);
-              await disconnectWallet();
-              router.replace('/welcome');
-            } catch (e) {
-              Alert.alert('Error', 'Failed to disconnect. Try again.');
-            }
-          }
+  Alert.alert(
+    walletType === 'external' ? '🔌 Disconnect MetaMask' : '⚠️ Remove Wallet',
+    walletType === 'external'
+      ? 'Disconnect MetaMask from Nimbus?'
+      : 'This removes the wallet from this device. Save your private key first!',
+    [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Disconnect',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await AsyncStorage.multiRemove([
+              'nimbus_wallet_pk',
+              'nimbus_connected_address',
+              'nimbus_wallet_type',
+            ]);
+          } catch {}
+          router.replace('/welcome');
         }
-      ]
-    );
-  };
+      }
+    ]
+  );
+};
 
   const totalSent = transactions
     .filter(t => t.type === 'sent')
